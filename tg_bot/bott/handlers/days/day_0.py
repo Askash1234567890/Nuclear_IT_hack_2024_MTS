@@ -1,144 +1,204 @@
-from datetime import datetime
-import torch
-import os
-from torchvision import transforms
-from PIL import Image
-from aiogram import types
-from aiogram.dispatcher import FSMContext
-from ultralytics import YOLO
 import numpy as np
-import cv2
-from aiogram.types import KeyboardButton
-
+from aiogram import types
+from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram.dispatcher import FSMContext
 from loader import dp, bot
 
-class net(torch.nn.Module):
-    def __init__(self):
-        super(net, self).__init__()
-        self.batch_norm0 = torch.nn.BatchNorm1d(512)
+from sklearn.cluster import KMeans
+from sklearn.cluster import kmeans_plusplus
+from tqdm import tqdm
+from wordcloud import WordCloud
+from nltk.corpus import stopwords
 
-        self.fc_1= torch.nn.Linear(512, 128)
-        self.act_1=torch.nn.ELU()
-        self.batch_norm1 = torch.nn.BatchNorm1d(128)
+import matplotlib.pyplot as plt
+import pandas as pd
+import re
+import pymorphy2
+import nltk
+from sentence_transformers import SentenceTransformer
 
-        self.fc_2 =torch.nn.Linear(128, 32)
-        self.act_2=torch.nn.ELU()
-        self.batch_norm2 = torch.nn.BatchNorm1d(32)
+###############################################################################################
+##############################____BASE_PREPROCESSING____#######################################
+nltk.download('stopwords')
+stopwords_ru = stopwords.words("russian")
+reg_stop = '|'.join(map(lambda x: f'(^{x}$)', stopwords_ru)) + '|(^из-за$)|(^из-под$)|(^.*ий$)' 
+reg = r'[^А-Яа-я /-]'
+bad_reg = r'(.*ху.*)|(.*пиз.*)|(.*еба.*)|(.*еби.*)' + rf'|{reg_stop}'
+###############################################################################################
+class FormStates(StatesGroup):
+    waiting_for_file = State()
 
-        # self.fc_3 =torch.nn.Linear(32, 8)
-        # self.act_3=torch.nn.ELU()
-        # self.batch_norm3 = torch.nn.BatchNorm1d(16)
+class GradSearch(object):
+    def __init__(self, a=1.0, b=0.0, x0=1.0, l=1e-2):
+        self.a = a
+        self.b = b
+        self.x0 = x0
+        self.l = l
+        self.loss = []
 
-        self.fc_4 = torch.nn.Linear(32, 2)
+    def f(self, x, y, a, b, x0):
+        return 0.5 * pow(y - a * np.exp(-x / x0) - b, 2).sum()
 
-        self.sm = torch.nn.Softmax(dim=1)
+    def dfda(self, x, y, a, b, x0):
+        return ((a * np.exp(-x / x0) + b - y) * np.exp(-x / x0)).sum()
 
-    def forward(self, x):
-        x = self.batch_norm0(x)
-        x=self.fc_1(x)
-        x=self.act_1(x)
-        x = self.batch_norm1(x)
+    def dfdb(self, x, y, a, b, x0):
+        return (a * np.exp(-x / x0) + b - y).sum()
 
-        x=self.fc_2(x)
-        x=self.act_2(x)
-        x = self.batch_norm2(x)
+    def dfdx0(self, x, y, a, b, x0):
+        return ((a * np.exp(-x / x0) + b - y) * a * np.exp(-x / x0) * x / pow(x0, 2)).sum()
 
-        # x=self.fc_3(x)
-        # x=self.act_3(x)
-        # x = self.batch_norm3(x)
+    def fit(self, x, y, epochs=1_000):
+        self.loss.append(self.f(x, y, self.a, self.b, self.x0))
+        for epoch in tqdm(range(epochs)):
+            self.a -= self.l * self.dfda(x, y, self.a, self.b, self.x0)
+            self.b -= self.l * self.dfdb(x, y, self.a, self.b, self.x0)
+            self.x0 -= self.l* self.dfdx0(x, y, self.a, self.b, self.x0)
+            self.loss.append(self.f(x, y, self.a, self.b, self.x0))
 
-        x = self.fc_4(x)
-        return x
+    def get_a_b_x0(self):
+        return self.a, self.b, self.x0
+    
+def prepare_model(words, name):
+    
+    morph = pymorphy2.MorphAnalyzer()
+    lemmas = [morph.parse(word)[0].normal_form if len(word) == 1 else word for word in words]
+    lemmas = [word for word in lemmas if not(re.search(bad_reg, word)) and word]
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+    sentences = lemmas
+    word_vectors = model.encode(sentences)
 
-    def inference(self, x):
-        x = self.forward(x)
-        x = self.sm(x)
-        return x
+    ran = range(1, min(len(lemmas) + 1, 100))
+    inertia_df = pd.DataFrame(data=[], index=ran, columns=['inertia'])
+    effective_clusters = -1
+    for n_clusters in tqdm(ran):
+        try:
+            effective_clusters += 1
+            centers, indices = kmeans_plusplus(np.array(word_vectors), n_clusters=n_clusters, random_state=10)
+            kmeans = KMeans(n_clusters=n_clusters,  random_state=42)
+            cluster_labels = kmeans.fit_predict(word_vectors)
+            inertia_df.loc[n_clusters] = kmeans.inertia_
+        except:
+            break
+    inertia_df = inertia_df.iloc[:effective_clusters]
+    inertia_arr = np.array(inertia_df).flatten()
+    inertia_derivative = inertia_arr[:-1] - inertia_arr[1:]
+    x, y = np.array(range(inertia_derivative.shape[0])), np.array(inertia_derivative).flatten()
+    y_norm = y.max()
+    y /= y_norm
 
+    grad = GradSearch(a=1.0, b=0.0, x0=1.0, l=1e-2)
+    grad.fit(x, y, epochs=100_000)
+    a, b, x0 = grad.get_a_b_x0()
 
-def get_tensor(photo_path):
+    ind = None
+    porog = (a + b) / np.e
+    for i, arg in enumerate(x):
+        if a * np.exp(- arg / x0) + b < porog:
+            ind = i
+            break
 
-    transform = transforms.Compose([
-        transforms.RandomResizedCrop(224),
-        transforms.ColorJitter(0.6, 0.6, 0.3, 0.3),
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    ])
+    n_clusters = ind + 1
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+    cluster_labels = kmeans.fit_predict(word_vectors)
 
-    photo = Image.open('./photo/shov')
-    photo = transform(photo)
+    df = pd.DataFrame(lemmas, columns=['word'])
+    df['cluster'] = cluster_labels
 
-    return photo
+    counter = {}
+    for i in range(n_clusters):
+        w = np.random.choice(df[df['cluster'] == i]['word'])
+        amount = df[df['cluster'] == i].shape[0]
+        counter[w] = amount
 
-def image_preparation(picture):
-    grayscale_image = cv2.cvtColor(picture, cv2.COLOR_BGR2GRAY)
-    gaussian = cv2.GaussianBlur(grayscale_image, (3, 3), 121)
-    image_equalize = cv2.equalizeHist(gaussian)
-    return image_equalize
+    wordcloud = WordCloud(width=800, height=400, background_color='white', colormap='magma').generate_from_frequencies(counter)
 
+    plt.figure(figsize=(10, 5))
+    plt.imshow(wordcloud, interpolation='bilinear')
+    plt.axis("off")
+    plt.title(name)
+    plt.savefig('cloud.png', format='png')
+    plt.close()
 
-def plot_bboxes(results):
-    img = results[0].orig_img
-    names = results[0].names
-    scores = results[0].boxes.conf.numpy()
-    classes = results[0].boxes.cls.numpy()
-    boxes = results[0].boxes.xyxy.numpy().astype(np.int32)
-    for score, cls, bbox in zip(scores, classes, boxes):
-        class_label = names[cls]
-        label = f"{class_label} : {score:0.2f}"
-        lbl_margin = 10
-        img = cv2.rectangle(img, (bbox[0], bbox[1]),
-                            (bbox[2], bbox[3]),
-                            color=(0, 0, 255),
-                            thickness=3)
-        label_size = cv2.getTextSize(label,
-                                     fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                                     fontScale=5, thickness=3)
-        lbl_w, lbl_h = label_size[0]
-        lbl_w += 2* lbl_margin
-        lbl_h += 2*lbl_margin
-        cv2.putText(img, label, (bbox[0]+ lbl_margin, bbox[1]-lbl_margin),
-                    fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                    fontScale=2.0, color=(0, 0, 255),
-                    thickness=3)
-    return img
-
-@dp.message_handler(commands=['start'])
+@dp.message_handler(commands=['start', 'help'])
 async def hi(message: types.Message):
     markup = types.ReplyKeyboardRemove()
-    await message.answer('Приветствую! Меня зовут МИФИст, я чат-бот предназначенный для поиска дефектов сварных швов'
-                         '\n\nОтправь мне фотографию сварного шва, чтобы я мог определить, есть ли у тебя дефект', reply_markup=markup)
+    await message.answer('Приветствую! Меня зовут Керил, я чат-бот предназначенный для создания облака слов на основе пользовательских ответов на вопросы'
+                         '\n\nОтправь мне список слов в формате csv файла, чтобы я мог создать облако', reply_markup=markup)
 
-@dp.message_handler(content_types='photo')
-async def for_name(message: types.Message, state: FSMContext):
-    markup = types.ReplyKeyboardRemove()
-    await message.photo[-1].download(destination_file='./photo/shov')
-    model1 = torch.jit.load('./models/model_scripted.pt')
-    model2 = torch.jit.load('./models/my_googlenet.pt')
-    model1.eval()
-    model2.eval()
-    photo = get_tensor('shov')
-    y_pred1 = model1.forward(photo.unsqueeze(0)).argmax(dim=1)
-    y_pred2 = model2.forward(photo.unsqueeze(0)).logits.argmax(dim=1)
-    y_pred = int(((y_pred1 + y_pred2) / 2 >= 0.5)[0])
-
-    if y_pred:
-        await message.answer('Есть дефект', reply_markup=markup)
-        photo = image_preparation('./photo/shov.jpg')
-        model = torch.jit.load('./models/timur.pt')
-        model.eval()
-        results = model.forward(photo.unsqueeze(0))
-        img = plot_bboxes(results)
-        #cv2_imshow(img)      #Если запускать с обычной IDE, то писать cv2.imshow(<image>)
-        #cv2.waitKey(0)
-        #cv2.destroyAllWindows()
-        await bot.send_photo(
-            chat_id=message.chat.id,
-            photo=img, reply_markup=markup
-        )
+@dp.message_handler(content_types=types.ContentType.DOCUMENT, state='*')
+async def handle_document(message: types.Message, state: FSMContext):
+    if message.document.mime_type == 'text/csv':
+        await state.set_state(FormStates.waiting_for_file)
+        await message.document.download(destination_file='received_file.csv')
+        await message.reply("Данные обрабатываются. Подождите...")
+        try:
+            words = pd.read_csv('received_file.csv')
+            res_words = []
+            for column in words.columns:
+                res_words.append(words[column].fillna("").tolist())
+        except Exception as e:
+            await message.reply(f"Ошибка при чтении файла: {str(e)}")
+            await state.finish()
+        for i in range(1, len(res_words)):
+            try:
+                prepare_model(res_words[i], words.columns[i])
+                # Send the plot back to user
+                with open('cloud.png', 'rb') as plot_file:
+                    await message.reply_photo(photo=plot_file)
+            except Exception as e:
+                if str(e) == 'zero-size array to reduction operation maximum which has no identity':
+                    await message.reply(f"В вопросе {words.columns[i]} нет слов")
+                await message.reply(f"Ошибка при чтении файла: {str(e)}")
+        await state.finish()
+    elif(message.document.mime_type == 'text/xlsx'):
+        await state.set_state(FormStates.waiting_for_file)
+        await message.document.download(destination_file='received_file.csv')
+        await message.reply("Данные обрабатываются. Подождите...")
+        try:
+            words = pd.read_excel('received_file.xlsx')
+            res_words = []
+            for column in words.columns:
+                res_words.append(words[column].fillna("").tolist())
+        except Exception as e:
+            await message.reply(f"Ошибка при чтении файла: {str(e)}")
+            await state.finish()
+        for i in range(1, len(res_words)):
+            try:
+                prepare_model(res_words[i], words.columns[i])
+                # Send the plot back to user
+                with open('cloud.png', 'rb') as plot_file:
+                    await message.reply_photo(photo=plot_file)
+            except Exception as e:
+                if str(e) == 'zero-size array to reduction operation maximum which has no identity':
+                    await message.reply(f"В вопросе {words.columns[i]} нет слов")
+                await message.reply(f"Ошибка при чтении файла: {str(e)}")
+        await state.finish()
+    elif(message.document.mime_type == 'text/xlsx'):
+        await state.set_state(FormStates.waiting_for_file)
+        await message.document.download(destination_file='received_file.csv')
+        await message.reply("Данные обрабатываются. Подождите...")
+        try:
+            words = pd.read_json('received_file.json')
+            res_words = []
+            for column in words.columns:
+                res_words.append(words[column].fillna("").tolist())
+        except Exception as e:
+            await message.reply(f"Ошибка при чтении файла: {str(e)}")
+            await state.finish()
+        for i in range(1, len(res_words)):
+            try:
+                prepare_model(res_words[i], words.columns[i])
+                # Send the plot back to user
+                with open('cloud.png', 'rb') as plot_file:
+                    await message.reply_photo(photo=plot_file)
+            except Exception as e:
+                if str(e) == 'zero-size array to reduction operation maximum which has no identity':
+                    await message.reply(f"В вопросе {words.columns[i]} нет слов")
+                await message.reply(f"Ошибка при чтении файла: {str(e)}")
+        await state.finish()
     else:
-        await message.answer('Нет дефекта', reply_markup=markup)
-
+        await message.reply("Пожалуйста, пришлите файл формата .csv/.json/.xlsx")
 
 
 
