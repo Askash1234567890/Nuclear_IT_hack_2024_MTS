@@ -1,0 +1,11 @@
+version: "3.3"
+
+# Define services/containers
+services:
+
+  bot:
+    build: .
+    volumes:
+      - ./photo:/app/photo:delegated
+      - ./files:/app/files:delegated
+    restart: on-failure
