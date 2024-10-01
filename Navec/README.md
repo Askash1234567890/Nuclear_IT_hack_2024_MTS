@@ -1,3 +1,4 @@
+#Navec
 Модель для использования Navec - русского аналога glove. Для ее работы нужно скачать и загрузить следующий файл:
 
 https://drive.google.com/file/d/1zkqdVLpmTxT58mOlrD5SYBUvBCwjk1zv/view?usp=sharing
