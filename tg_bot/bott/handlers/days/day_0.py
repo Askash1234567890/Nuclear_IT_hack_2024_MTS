@@ -151,9 +151,9 @@ async def handle_document(message: types.Message, state: FSMContext):
                     await message.reply(f"В вопросе {words.columns[i]} нет слов")
                 await message.reply(f"Ошибка при чтении файла: {str(e)}")
         await state.finish()
-    elif(message.document.mime_type == 'text/xlsx'):
+    elif(message.document.mime_type == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'):
         await state.set_state(FormStates.waiting_for_file)
-        await message.document.download(destination_file='received_file.csv')
+        await message.document.download(destination_file='received_file.xlsx')
         await message.reply("Данные обрабатываются. Подождите...")
         try:
             words = pd.read_excel('received_file.xlsx')
@@ -174,9 +174,9 @@ async def handle_document(message: types.Message, state: FSMContext):
                     await message.reply(f"В вопросе {words.columns[i]} нет слов")
                 await message.reply(f"Ошибка при чтении файла: {str(e)}")
         await state.finish()
-    elif(message.document.mime_type == 'text/xlsx'):
+    elif(message.document.mime_type == 'application/json'):
         await state.set_state(FormStates.waiting_for_file)
-        await message.document.download(destination_file='received_file.csv')
+        await message.document.download(destination_file='received_file.json')
         await message.reply("Данные обрабатываются. Подождите...")
         try:
             words = pd.read_json('received_file.json')
