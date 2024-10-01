@@ -14,3 +14,4 @@ tqdm
 nltk
 pandas
 sentence-transformers
+openpyxl

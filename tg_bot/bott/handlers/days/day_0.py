@@ -15,6 +15,7 @@ import pandas as pd
 import re
 import pymorphy2
 import nltk
+import json
 from sentence_transformers import SentenceTransformer
 
 ###############################################################################################
@@ -61,9 +62,20 @@ class GradSearch(object):
     
 def prepare_model(words, name):
     
+
+    words = [re.sub(reg, '', word.lower()).strip() for word in words]
     morph = pymorphy2.MorphAnalyzer()
-    lemmas = [morph.parse(word)[0].normal_form if len(word) == 1 else word for word in words]
-    lemmas = [word for word in lemmas if not(re.search(bad_reg, word)) and word]
+    dict_lemmas_to_words = {}
+    lemmas = []
+    for word in words:
+        data = word.split()
+        if len(data) == 1:
+            lemmas.append(morph.parse(word)[0].normal_form)
+        else:
+            lemmas.append(' '.join([morph.parse(w)[0].normal_form for w in data if not(re.search(bad_reg, w))]))
+            if word:
+                dict_lemmas_to_words[lemmas[-1]] = word
+
     model = SentenceTransformer('all-MiniLM-L6-v2')
     sentences = lemmas
     word_vectors = model.encode(sentences)
@@ -119,6 +131,8 @@ def prepare_model(words, name):
     plt.title(name)
     plt.savefig('cloud.png', format='png')
     plt.close()
+    with open('file.json', 'w') as json_file:
+        json.dump(counter, json_file, indent=4)
 
 @dp.message_handler(commands=['start', 'help'])
 async def hi(message: types.Message):
@@ -146,6 +160,9 @@ async def handle_document(message: types.Message, state: FSMContext):
                 # Send the plot back to user
                 with open('cloud.png', 'rb') as plot_file:
                     await message.reply_photo(photo=plot_file)
+                with open("file.json", "r") as file:
+                # Отправка документа пользователю
+                    await bot.send_document(chat_id=message.chat.id, document=file)
             except Exception as e:
                 if str(e) == 'zero-size array to reduction operation maximum which has no identity':
                     await message.reply(f"В вопросе {words.columns[i]} нет слов")
@@ -169,6 +186,9 @@ async def handle_document(message: types.Message, state: FSMContext):
                 # Send the plot back to user
                 with open('cloud.png', 'rb') as plot_file:
                     await message.reply_photo(photo=plot_file)
+                with open("file.json", "r") as file:
+                # Отправка документа пользователю
+                    await bot.send_document(chat_id=message.chat.id, document=file)
             except Exception as e:
                 if str(e) == 'zero-size array to reduction operation maximum which has no identity':
                     await message.reply(f"В вопросе {words.columns[i]} нет слов")
@@ -186,12 +206,15 @@ async def handle_document(message: types.Message, state: FSMContext):
         except Exception as e:
             await message.reply(f"Ошибка при чтении файла: {str(e)}")
             await state.finish()
-        for i in range(1, len(res_words)):
+        for i in range(len(res_words)):
             try:
                 prepare_model(res_words[i], words.columns[i])
                 # Send the plot back to user
                 with open('cloud.png', 'rb') as plot_file:
                     await message.reply_photo(photo=plot_file)
+                with open("file.json", "r") as file:
+                # Отправка документа пользователю
+                    await bot.send_document(chat_id=message.chat.id, document=file)
             except Exception as e:
                 if str(e) == 'zero-size array to reduction operation maximum which has no identity':
                     await message.reply(f"В вопросе {words.columns[i]} нет слов")
