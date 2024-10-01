@@ -1,6 +1,6 @@
 ## Navec
 
-__Navec__ - языковая модель, русский аналог glove. Для ее работы нужно скачать и загрузить следующий файл:
+__Navec__ - языковая модель, русский аналог __glove__. Для ее работы нужно скачать и загрузить следующий файл:
 
 https://drive.google.com/file/d/1zkqdVLpmTxT58mOlrD5SYBUvBCwjk1zv/view?usp=sharing
 
