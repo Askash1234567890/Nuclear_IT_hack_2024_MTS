@@ -46,5 +46,4 @@
   - Маньшин Тимур, С19-114;
   - Усков Даниил, М24-501;
   - Монастырный Максим, М24-501.
-
-[Презентация](https://docs.google.com/presentation/d/1mRKwMHFNUtkILhjpI5Q-0A1b2p32dU0TqDkY09PXuSI/edit#slide=id.g2d3c249037e_1_9).
+[Презентация](https://docs.google.com/presentation/d/1mRKwMHFNUtkILhjpI5Q-0A1b2p32dU0TqDkY09PXuSI/edit#slide=id.p1)
