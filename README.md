@@ -47,4 +47,4 @@
   - Усков Даниил, М24-501;
   - Монастырный Максим, М24-501.
 
-[Презентация](https://docs.google.com/presentation/d/1mRKwMHFNUtkILhjpI5Q-0A1b2p32dU0TqDkY09PXuSI/edit#slide=id.p1)
+[Презентация решения](https://github.com/Askash1234567890/Nuclear_IT_hack_2024_MTS/blob/main/Презентация_решения.pdf)
